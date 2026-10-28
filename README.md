@@ -1,62 +1,42 @@
-# SmartResearch AI Agent - My Freshman Summer Internship Project
+# Solar Flare Forecasting with EfficientNet
+
+This repository contains the development and training pipeline for a deep learning model designed to forecast solar flares using magnetogram data. The model leverages the **EfficientNetV2B3** architecture and is optimized for training on TPUs (Tensor Processing Units) in environments like Kaggle.
 
 ## Project Overview
 
-* **Duration:** 8-10 weeks (Summer 2025 Internship at Auditoria)
-* **Role:** AI Developer Intern
-* **Goal:** Build a working prototype of an AI-powered business tool while learning enterprise AI development practices.
+The core of this project is a Jupyter Notebook (`solarflareefficientnetmodel.ipynb`) that defines a custom data pipeline for astrophysical `.fits` files and trains an image classification model to predict solar flare occurrences.
 
-## What I'm Building & Learning
+### Key Features
+* **TPU Acceleration:** Utilizes `tf.distribute.TPUStrategy` for distributed, high-performance training.
+* **Custom FITS Data Generator:** Implements a custom Keras Sequence (`FitsDataGen`, inspired by Boucheron 2023) to read FITS files, scale intensities properly relative to the global dataset extremums, and apply real-time data augmentation.
+* **Advanced Data Augmentation:** Includes random horizontal/vertical flips and random rotations (up to 10 degrees with nearest-neighbor fill mode) to improve model generalization on magnetograms.
+* **Domain-Specific Metrics:** Because solar flares are rare events, standard accuracy is insufficient. The model tracks custom metrics tailored for space weather forecasting, including:
+  * **TSS** (True Skill Statistic)
+  * **HSS** (Heidke Skill Score)
+  * **TPR** (True Positive Rate) & **TNR** (True Negative Rate)
+  * **F1 Score**
+* **Class Weighting:** Applies custom class weights during training to handle dataset imbalances between flare and non-flare events.
 
-For my summer project, I am building a simplified version of an AI-powered business question-answering system. Think of it as "ChatGPT for business data," but specifically focused on the finance and accounting domain using mock enterprise data sources.
+## Model Architecture
+* **Base Model:** `EfficientNetV2B3` (pre-trained on ImageNet).
+* **Input Shape:** $300 \times 300 \times 3$
+* **Custom Top Layers:** 
+  * `GlobalAveragePooling2D`
+  * `Dropout` (rate: 0.5) to prevent overfitting.
+  * `Dense` output layer with 2 units (Softmax activation) for binary classification.
 
-A major focus of this internship is practicing **"disciplined vibe coding"**—leveraging AI coding assistants (like GitHub Copilot, Cursor, ChatGPT, and Claude) as pair-programming partners while maintaining rigorous engineering practices, conducting proper code reviews, and applying systematic problem-solving approaches.
+## Dataset
+The model trains on FITS magnetogram data representing Solar Active Regions (ARs: 2284-2731). The paths in the notebook are currently configured for Kaggle directories:
+* `/kaggle/input/datasetsmagnetogram/` (Train/Test/Val splits)
+* `/kaggle/input/solar-flare-medium-dataset/Lat60_Lon60_Nans0/` (Raw FITS images)
 
-**Example of what my finished project will do:**
-* **User asks:** "What were our top 5 vendors by spending last month?"
-* **My system:** Converts this natural language into the correct API call, retrieves the relevant data from a mock financial database, and presents the answer in a clean, conversational format.
+## Requirements
+To run the notebook, you will need a TPU-enabled environment and the following libraries:
+* `tensorflow` / `keras`
+* `astropy` (for reading `.fits` files)
+* `scikit-image` (`skimage` for image resizing)
+* `pandas` & `numpy`
 
-## Project Scope
-
-### Core Features (My Primary Deliverables)
-1. **Simple Chat Interface** - A web frontend where users can type business questions.
-2. **Question Classification** - AI logic to identify the type of data requested (e.g., vendors, invoices, payments).
-3. **Mock Data APIs** - Custom endpoints that simulate real enterprise business systems.
-4. **Response Generation** - Processing raw database returns into readable, conversational answers.
-5. **Basic Admin Panel** - A simple dashboard to monitor and log the questions being asked.
-
-### Stretch Goals
-* Add charts and graph components to the chat responses.
-* Implement memory to handle follow-up questions in the same conversation session.
-* Add simple user authentication.
-* Create an export feature (PDF/CSV) for the generated answers.
-
-## My Development Roadmap - Week by Week
-
-### Weeks 1-2: Foundation & Setup
-**Focus:** Development environment, version control, and project structure.
-* [x] Set up my development environment (Cursor, Git, Python/Node.js)
-* [x] Create a basic web page with a chat-like interface
-* [x] Learn to use APIs by connecting to a simple weather API
-* [ ] Set up a mock database with sample business data (vendors, invoices, etc.)
-
-**Frontend Skills Applied:**
-* [x] Build responsive chat UI with HTML/CSS
-* [x] Implement message sending/receiving with JavaScript
-* [ ] Handle form submissions and user input validation
-* [ ] Practice DOM manipulation and event handling
-* [ ] Create loading states and error messaging
-
-### Week 2.5: API Fundamentals & Data Design
-**Focus:** HTTP requests, JSON parsing, database schema design.
-* Practice with REST APIs using public APIs.
-* Implement error handling for API failures and network issues.
-* Design my business data schema (relationships between vendors, invoices, and payments).
-* Create mock data that reflects real business scenarios.
-
-### Weeks 3-4: Understanding Business Questions
-**Focus:** Text processing, pattern matching, working with AI APIs.
-* Use OpenAI's API to analyze user questions.
-* Create simple rules to categorize questions (vendor questions vs. invoice questions).
-* Build my first business data API endpoint.
-* Connect question analysis
+You can install the required specific dependencies via:
+```bash
+pip install astropy pandas numpy scikit-image
