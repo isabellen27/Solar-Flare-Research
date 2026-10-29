@@ -222,22 +222,3 @@ Developed on Kaggle (`/kaggle/input/...` paths). Dependencies: `numpy`,
 `pandas`, `scikit-learn`, `xgboost`, `shap`, `tensorflow` / `keras`, `scipy`,
 `matplotlib`, `joblib`.
 
-## Known caveats
-
-* **Leakage risk in Phase 1.** `X`/`Y` are shuffled with
-  `np.random.permutation` before the split, even though the next cell is
-  commented as a "chronological split". Overlapping windows from the same
-  active region (and the stride-2 augmented windows) can land in both train
-  and validation, which likely inflates the reported scores.
-* **Negative features are clipped.** The `log1p(clip(x, 0, None))` transform
-  zeroes the nine signed SHARP parameters (`TOTFZ`, `EPSZ`, `MEANJZH`,
-  `TOTFY`, `MEANJZD`, `MEANALP`, `TOTFX`, `EPSY`, `EPSX`) whenever they are
-  negative, discarding sign information.
-* **Class imbalance.** X flares are rare (115 train / 66 validation);
-  X-flare recall (0.79) is the weakest metric.
-* **Phase 2 label.** The section header reads "X CLASS FLARE TRAINING" but the
-  data file is `mflareinstances_FULLCOL.csv` (M-flare instances).
-* **Phase 2 data provenance.** The generation of the `(15 → 5)` regression
-  dataset is not included in this folder.
-* The feature-dropping cells (`X = X[:, :, :-2]`, `X = X[:, :, 5:6]`) must be
-  run exactly once per kernel session.
