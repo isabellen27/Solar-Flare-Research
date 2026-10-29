@@ -25,6 +25,7 @@ Notebooks for a two-phase approach to forecasting solar flares from the
 ## Data
 
 ### Source
+
 SWAN-SF partitions 1–5 (Kaggle datasets `partition{1..5}-swanrafal-et-al`).
 Each active region is a tab-separated CSV (e.g. `partition1/753.csv`,
 1716 rows × 55 columns) sampled every 12 minutes. Columns:
@@ -79,6 +80,7 @@ An earlier 8-feature variant of the dataset
 is the column layout used by Phase 2.
 
 ### Phase 2 dataset
+
 `mflareinstances_FULLCOL.csv` (`/kaggle/input/mflareinstances-6col-cleaned/`):
 311 M-flare instances with `input` of shape `(15, 8)` (8-feature layout
 above) and `output` of shape `(5, 1)` – the five `XR_MAX` values following the
@@ -88,6 +90,7 @@ generates this file is **not** in this folder.
 ## Phase 1 – flare classification (`phase-1-model.ipynb`)
 
 ### Pre-processing
+
 1. Drop the last two features (`XR_QUAL`, `IS_TMFI`) → `(N, 15, 25)`.
 2. Shuffle, then split 60 % / 40 % into train / validation
    (4785 / 3191 samples).
@@ -96,11 +99,12 @@ generates this file is **not** in this folder.
 4. Labels stay as integers.
 
 | Split | No flare | M flare | X flare |
-| --- | --- | --- | --- |
+| --- | ---: | ---: | ---: |
 | Train | 2930 | 1740 | 115 |
 | Validation | 1983 | 1142 | 66 |
 
 ### Model
+
 Each `(15, 25)` window is collapsed into 125 features
 (`mean`, `std`, `last`, `min`, `max` over time for each feature) and fed to
 
@@ -108,3 +112,132 @@ Each `(15, 25)` window is collapsed into 125 features
 XGBClassifier(n_estimators=100, max_depth=6, learning_rate=0.1,
               objective="multi:softprob", num_class=3,
               eval_metric="mlogloss", random_state=42)
+```
+
+### Results (validation)
+
+* Accuracy **0.979**; macro precision 0.950, macro recall 0.918, macro F1 0.93
+
+| Class | Precision | Recall | F1 | Support |
+| --- | ---: | ---: | ---: | ---: |
+| No flare | 0.99 | 0.98 | 0.99 | 1983 |
+| M flare | 0.96 | 0.98 | 0.97 | 1142 |
+| X flare | 0.90 | 0.79 | 0.84 | 66 |
+
+```text
+Confusion matrix (rows = true, cols = predicted)
+[[1950   33    0]
+ [  13 1123    6]
+ [   0   14   52]]
+```
+
+### Interpretability & ablation
+
+* **Gain importance** – top features: `mean_TOTFX`, `mean_MEANSHR`,
+  `mean_TOTUSJH`, `mean_MEANGBH`, `last_TOTFX`, `min_MEANALP`, `min_MEANSHR`,
+  `last_TOTUSJH`, `mean_TOTBSQ`, `last_MEANALP`.
+* **SHAP** – `TreeExplainer` summary plots per class and a global ranking by
+  mean |SHAP| averaged over classes.
+* **Ablation** – retrain on the top-k features
+  (k ∈ {5, 10, 15, 20, 30, 50, 75, 100, 125}); one-vs-rest ROC AUC / PR AUC per
+  class, shown as ROC curves (top 5/10/20) and a 3-D surface over (k, class).
+* Artifacts: `xgb_model.pkl`, sample windows `X_cls.npy`, `y_cls.npy`.
+
+## Phase 2 – frequency analysis (`fourier-transform-for-phase-2.ipynb`)
+
+Worked example on AR 753 (partition 1):
+
+1. Extract `XR_MAX`, apply `log1p` + `StandardScaler`.
+2. FFT with `dt = 720 s`; power spectrum `|X(f)|²`.
+3. **Low-pass filter**: zero all bins with period shorter than `T = 7200 s`,
+   inverse FFT, and overlay the smoothed series on the raw one.
+4. Stem plot of the FFT magnitude spectrum.
+5. Time–frequency views: `scipy.signal.spectrogram` (Hann, `nperseg=128`,
+   50 % overlap, per-column normalised dB) and `scipy.signal.stft`
+   (`nperseg=512`), `fs = 1/720 Hz`.
+
+## Phase 2 – flux forecasting (`phase-2-model.ipynb`)
+
+### Pre-processing
+
+1. Keep only `XR_MAX` → `X: (311, 15, 1)`, `Y: (311, 5, 1)`.
+2. Remove the 4 samples whose targets contain the `-99999` fill value → 307.
+3. Shuffle; split 60 % train (184), then the remainder 75 % / 25 % into
+   test (92) and validation (31).
+4. `log1p` + `StandardScaler` for both inputs and targets (fit on train only).
+   Target range in the training set ≈ 9.3 × 10⁻⁵ W m⁻².
+
+### Model (`build_lstm_teacher_forcing`)
+
+Encoder–decoder LSTM trained with teacher forcing:
+
+```text
+encoder_inputs (15, 1)
+  → GaussianNoise(σ = 0.02)                      # training only
+  → LSTM(units, return_sequences, return_state)
+  → Dropout
+decoder_inputs (5, 1)  (previous ground-truth step, 0 at t = 0)
+  → LSTM(units) initialised with encoder states
+  → AdditiveAttention(query = decoder outputs, value = encoder outputs)
+  → Concatenate → Dropout → TimeDistributed(Dense(1))
+loss = Huber, optimizer = Adam, metric = MAE
+```
+
+A simpler baseline (`build_lstm_model`: LSTM → RepeatVector → LSTM → Dense)
+is also defined. Two helper plots visualise the effect of the Gaussian input
+noise (σ ∈ {0, 0.005, 0.01, 0.02}) on one encoder window.
+
+### Inference
+
+`make_inference_models` splits the trained network into an encoder and a
+one-step decoder; `predict_autoregressive` feeds each prediction back as the
+next decoder input. The decoder is seeded with the **last raw `XR_MAX`
+value** of the input window, converted to the target's log/scaled space
+(`start_token="last_x_raw"`).
+
+### Model selection
+
+* `cross_val_score_lstm`: `TimeSeriesSplit(n_splits=5)`, per-fold scalers,
+  `EarlyStopping(patience=8, restore_best_weights=True)`,
+  `ReduceLROnPlateau(factor=0.5, patience=4)`, RMSE computed in original units
+  after autoregressive prediction.
+* Grid: `lstm_units ∈ {32, 64, 128}`, `dropout ∈ {0.2, 0.3, 0.4}`,
+  `lr ∈ {1e-3, 5e-4, 1e-4}`, `batch_size ∈ {8, 16, 32, 64}`
+  (grid-search cell is kept as markdown; run it to reproduce).
+* Final configuration: **units = 32, dropout = 0.3, lr = 1e-3, batch = 16**,
+  up to 100 epochs. Training stopped at epoch 68 with best
+  `val_loss ≈ 0.259` / `val_mae ≈ 0.48` (Huber / MAE in scaled log space).
+
+### Evaluation
+
+`plot_flare_trajectory` plots, for each test instance, the input `XR_MAX`
+(t = −15 … −1), the true and predicted flux (t = 0 … 4) in original units on a
+log axis, with a vertical line at flare onset. Predictions follow the decay of
+the flux after onset but tend to under-predict the peak for the strongest
+events (e.g. true 5.5 × 10⁻⁵ vs. predicted 1.4 × 10⁻⁵ W m⁻²).
+
+## Environment
+
+Developed on Kaggle (`/kaggle/input/...` paths). Dependencies: `numpy`,
+`pandas`, `scikit-learn`, `xgboost`, `shap`, `tensorflow` / `keras`, `scipy`,
+`matplotlib`, `joblib`.
+
+## Known caveats
+
+* **Leakage risk in Phase 1.** `X`/`Y` are shuffled with
+  `np.random.permutation` before the split, even though the next cell is
+  commented as a "chronological split". Overlapping windows from the same
+  active region (and the stride-2 augmented windows) can land in both train
+  and validation, which likely inflates the reported scores.
+* **Negative features are clipped.** The `log1p(clip(x, 0, None))` transform
+  zeroes the nine signed SHARP parameters (`TOTFZ`, `EPSZ`, `MEANJZH`,
+  `TOTFY`, `MEANJZD`, `MEANALP`, `TOTFX`, `EPSY`, `EPSX`) whenever they are
+  negative, discarding sign information.
+* **Class imbalance.** X flares are rare (115 train / 66 validation);
+  X-flare recall (0.79) is the weakest metric.
+* **Phase 2 label.** The section header reads "X CLASS FLARE TRAINING" but the
+  data file is `mflareinstances_FULLCOL.csv` (M-flare instances).
+* **Phase 2 data provenance.** The generation of the `(15 → 5)` regression
+  dataset is not included in this folder.
+* The feature-dropping cells (`X = X[:, :, :-2]`, `X = X[:, :, 5:6]`) must be
+  run exactly once per kernel session.
