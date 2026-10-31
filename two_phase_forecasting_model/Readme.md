@@ -67,7 +67,7 @@ Window sizes: `L = H = 3 h / 12 min = 15` steps.
    * `output` – `0` / `1` / `2`.
 
 Nine features can be negative (`TOTFZ`, `EPSZ`, `MEANJZH`, `TOTFY`,
-`MEANJZD`, `MEANALP`, `TOTFX`, `EPSY`, `EPSX`); see *Known caveats*.
+`MEANJZD`, `MEANALP`, `TOTFX`, `EPSY`, `EPSX`).
 
 The notebook also contains a `datvisualization` helper (mean ± std of a
 feature per time step, flare vs. non-flare) and literature notes on useful
